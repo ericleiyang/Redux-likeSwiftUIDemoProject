@@ -9,7 +9,40 @@
 import Foundation
 import Combine
 
-class RecipeService {
+enum APIServiceError: Error {
+    case paring(description: String)
+    case network(description: String)
+}
+
+protocol RecipeServiceProtocol {
+    func fetch(query: String, page: Int) -> AnyPublisher<[Recipe], Error>
+}
+
+class APIService {
+    private let session: URLSession
+    
+    init(session: URLSession = URLSession.shared) {
+        self.session = session
+    }
+    
+    func get<T: Decodable>(with components: URLComponents) -> AnyPublisher<T, Error> {
+        guard let url = components.url else {
+            let error = APIServiceError.network(description: "URL is missing")
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: URLRequest(url: url))
+            .mapError { error -> APIServiceError in
+                return APIServiceError.network(description: error.localizedDescription)
+            }
+            .flatMap(maxPublishers: .max(1)) { pair in
+                decode(pair.data)
+            }
+            .eraseToAnyPublisher()
+    }
+}
+
+class RecipeService: APIService {
     private struct RecipeResponse: Decodable {
         let hits: [Hit]
         
@@ -45,7 +78,7 @@ class RecipeService {
                 .setFailureType(to: Error.self)
                 .eraseToAnyPublisher()
         }
-        
+
         return URLSession.shared.dataTaskPublisher(for: url)
             .map{$0.data}
             .decode(type: RecipeResponse.self, decoder: Current.decoder)
